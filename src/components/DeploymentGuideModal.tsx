@@ -133,9 +133,9 @@ export default function DeploymentGuideModal({ isOpen, onClose }: DeploymentGuid
 
           {/* Step 4: Customization & Photo */}
           <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-500/20 text-xs text-slate-300 space-y-2">
-            <span className="font-semibold text-purple-300 block">Personal Profile Photo (Banupriyamani.p.jpeg):</span>
+            <span className="font-semibold text-purple-300 block">Personal Profile Photo (public/Banupriyamani.p.jpeg):</span>
             <p className="text-slate-400 leading-relaxed">
-              Your exact photo is configured at <span className="text-white font-mono">/Banupriyamani.p.jpeg</span>. Simply keep <span className="text-purple-300 font-mono">Banupriyamani.p.jpeg</span> inside the <span className="text-white font-mono">public/</span> folder of your repository. When deployed to Vercel or run locally, Vite automatically serves it everywhere your profile photo is displayed.
+              Your exact photo is configured at <span className="text-white font-mono">public/Banupriyamani.p.jpeg</span>. Make sure your original <span className="text-purple-300 font-mono">Banupriyamani.p.jpeg</span> file (90.1 KB) is placed inside the <span className="text-white font-mono">public/</span> folder before pushing to GitHub. When deployed to Vercel, it displays automatically at your live link on all devices.
             </p>
           </div>
         </div>

@@ -10,9 +10,8 @@ import {
   Sparkles, 
   Code2, 
   Database,
-  Camera,
-  Upload,
-  CheckCircle2
+  UploadCloud,
+  Check
 } from 'lucide-react';
 import { PORTFOLIO_DATA } from '../data/portfolioData';
 
@@ -25,48 +24,122 @@ export default function Hero({ onOpenResume, onDownloadResume }: HeroProps) {
   const p = PORTFOLIO_DATA.personal;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Maintain photo state: checks localStorage first, then default /Banupriyamani.p.jpeg
+  // Initialize photo source: check localStorage first, otherwise fallback to project asset
   const [photoSrc, setPhotoSrc] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('banupriya_profile_photo');
-      if (saved) return saved;
+    try {
+      const cached = localStorage.getItem('banupriya_profile_image') || localStorage.getItem('banupriya_profile_photo');
+      if (cached && cached.startsWith('data:image')) {
+        return cached;
+      }
+    } catch {
+      // Ignore
     }
-    return p.profileImage; // "/Banupriyamani.p.jpeg"
+    return p.profileImage;
   });
 
-  const [imageError, setImageError] = useState(false);
-  const [uploadToast, setUploadToast] = useState(false);
+  const [hasValidImage, setHasValidImage] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('banupriya_profile_image') || localStorage.getItem('banupriya_profile_photo');
+      return !!(cached && cached.startsWith('data:image'));
+    } catch {
+      return false;
+    }
+  });
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Background sync: If photo is in localStorage, ensure server public/Banupriyamani.p.jpeg has it
   useEffect(() => {
-    // Test if photoSrc loads or fails
-    const img = new Image();
-    img.src = photoSrc;
-    img.onload = () => setImageError(false);
-    img.onerror = () => {
-      // If /Banupriyamani.p.jpeg is not yet written to server disk, prompt seamless attach
-      if (!photoSrc.startsWith('data:')) {
-        setImageError(true);
+    try {
+      const cached = localStorage.getItem('banupriya_profile_image') || localStorage.getItem('banupriya_profile_photo');
+      if (cached && cached.startsWith('data:image')) {
+        fetch('/api/save-profile-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: cached }),
+        }).catch(() => {});
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  // Listen for paste anywhere on window
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            processAndSavePhoto(file);
+          }
+        }
       }
     };
-  }, [photoSrc]);
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processAndSavePhoto = (file: File) => {
+    setIsSaving(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      if (!base64) {
+        setIsSaving(false);
+        return;
+      }
+
+      // 1. Immediately render photo in UI with zero delay
+      setPhotoSrc(base64);
+      setHasValidImage(true);
+
+      // 2. Persist in browser storage for instant reload
+      try {
+        localStorage.setItem('banupriya_profile_image', base64);
+      } catch {
+        // Ignore storage quotas
+      }
+
+      // 3. Persist on server disk (public/Banupriyamani.p.jpeg and public/profile.jpg)
+      try {
+        const res = await fetch('/api/save-profile-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64 }),
+        });
+        if (res.ok) {
+          setSavedSuccess(true);
+          setTimeout(() => setSavedSuccess(false), 3000);
+        }
+      } catch (err) {
+        console.warn('Server save background note:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      processAndSavePhoto(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64Data = event.target?.result as string;
-        setPhotoSrc(base64Data);
-        setImageError(false);
-        try {
-          localStorage.setItem('banupriya_profile_photo', base64Data);
-        } catch {
-          // localStorage capacity handling
-        }
-        setUploadToast(true);
-        setTimeout(() => setUploadToast(false), 3000);
-      };
-      reader.readAsDataURL(file);
+      processAndSavePhoto(file);
     }
   };
 
@@ -76,11 +149,20 @@ export default function Hero({ onOpenResume, onDownloadResume }: HeroProps) {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[380px] bg-gradient-to-tr from-purple-600/18 via-indigo-600/12 to-transparent blur-3xl pointer-events-none rounded-full" />
       <div className="absolute top-20 right-10 w-[320px] h-[320px] bg-blue-600/10 blur-3xl pointer-events-none rounded-full" />
 
+      {/* Hidden file input for one-click selection if needed */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+      />
+
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
           {/* Left Column: Hero Narrative */}
           <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
-            {/* Unboxed Metadata Header (Zero-Pill Discipline) */}
+            {/* Metadata Header */}
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2 text-xs font-medium text-slate-400">
               <span className="flex items-center gap-1.5 text-purple-300">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -189,43 +271,70 @@ export default function Hero({ onOpenResume, onDownloadResume }: HeroProps) {
             </div>
           </div>
 
-          {/* Right Column: Exact Uploaded Portrait with Elegant Frame & Subtle Glow */}
+          {/* Right Column: Profile Photo Card */}
           <div className="lg:col-span-5 flex justify-center lg:justify-end">
-            <div className="relative w-full max-w-[360px]">
+            <div 
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onClick={() => {
+                if (!hasValidImage && fileInputRef.current) {
+                  fileInputRef.current.click();
+                }
+              }}
+              className="relative w-full max-w-[360px] group cursor-pointer"
+              title={hasValidImage ? "Banupriya Mani" : "Click or drop Banupriyamani.p.jpeg to set photo"}
+            >
               {/* Outer decorative ambient halo */}
-              <div className="absolute -inset-2 bg-gradient-to-br from-purple-600/35 via-indigo-600/25 to-blue-600/30 rounded-3xl blur-xl opacity-80 group-hover:opacity-100 transition duration-700" />
+              <div className="absolute -inset-2 bg-gradient-to-br from-purple-600/35 via-indigo-600/25 to-blue-600/30 rounded-3xl blur-xl opacity-80 transition duration-700 pointer-events-none" />
 
               {/* Main Professional Frame Container */}
-              <div className="relative bg-[#0d0f18] border border-purple-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-xl transition-all">
-                {/* Image Container with precise aspect framing, keeping 100% natural features and skin tone */}
-                <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-slate-900 border border-white/10 group">
-                  {!imageError ? (
-                    <img
-                      src={photoSrc}
-                      alt="Banupriya Mani"
-                      className="w-full h-full object-cover object-top transform transition-transform duration-500"
-                      referrerPolicy="no-referrer"
-                      onError={() => setImageError(true)}
-                    />
-                  ) : (
-                    /* Seamless Fallback with Instant 1-Click File Connector */
-                    <div 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full h-full flex flex-col items-center justify-center p-6 text-center cursor-pointer bg-gradient-to-br from-slate-900 via-purple-950/20 to-slate-900 hover:bg-slate-800/80 transition-colors"
-                      title="Click to load Banupriyamani.p.jpeg"
-                    >
-                      <div className="p-3 bg-purple-500/10 rounded-2xl border border-purple-500/30 text-purple-400 mb-3 animate-bounce">
-                        <Upload className="w-6 h-6" />
+              <div className="relative bg-[#0d0f18] border border-purple-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-xl">
+                {/* Image Container */}
+                <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-slate-900 border border-white/10 shadow-inner flex items-center justify-center">
+                  {/* Photo is rendered if valid photo exists */}
+                  <img
+                    src={photoSrc}
+                    alt="Banupriya Mani"
+                    className={`w-full h-full object-cover object-top transition-opacity duration-300 ${
+                      hasValidImage ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
+                    }`}
+                    referrerPolicy="no-referrer"
+                    loading="eager"
+                    onLoad={() => setHasValidImage(true)}
+                    onError={() => {
+                      if (!photoSrc.startsWith('data:image')) {
+                        setHasValidImage(false);
+                      }
+                    }}
+                  />
+
+                  {/* Fallback Upload Placeholder: only visible when no photo has been provided yet */}
+                  {!hasValidImage && (
+                    <div className="p-6 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center mx-auto">
+                        <UploadCloud className="w-6 h-6 animate-pulse" />
                       </div>
-                      <span className="text-xs font-semibold text-white block">
-                        Select Banupriyamani.p.jpeg
-                      </span>
-                      <p className="text-[11px] text-slate-400 mt-1 max-w-[200px] leading-relaxed">
-                        Click to display your uploaded photo in full quality.
-                      </p>
-                      <span className="mt-2 text-[10px] text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded">
-                        100% Natural Resolution
-                      </span>
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-white">Click or Drop Photo Here</p>
+                        <p className="text-[11px] text-slate-400">
+                          Select <span className="text-purple-300 font-mono">Banupriyamani.p.jpeg</span> to display immediately and save permanently
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Saving status indicator */}
+                  {isSaving && (
+                    <div className="absolute inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center text-xs text-purple-300 font-medium">
+                      Saving photo to project assets...
+                    </div>
+                  )}
+
+                  {/* Saved success flash */}
+                  {savedSuccess && (
+                    <div className="absolute top-3 right-3 bg-emerald-500/90 text-white text-[11px] font-medium px-2 py-0.5 rounded-md flex items-center gap-1 shadow-md">
+                      <Check className="w-3 h-3" />
+                      <span>Saved</span>
                     </div>
                   )}
 
@@ -234,23 +343,6 @@ export default function Hero({ onOpenResume, onDownloadResume }: HeroProps) {
                     <Sparkles className="w-3 h-3 text-purple-400" />
                     <span>Banupriya Mani</span>
                   </div>
-
-                  {/* Discrete Change/Sync Button */}
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="absolute bottom-3 right-3 bg-[#0d0f18]/80 hover:bg-[#0d0f18] backdrop-blur-md border border-white/15 p-2 rounded-lg text-slate-300 hover:text-white transition-all shadow-md"
-                    title="Load or update Banupriyamani.p.jpeg"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                  </button>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
                 </div>
 
                 {/* Card Sub-content */}
@@ -288,17 +380,6 @@ export default function Hero({ onOpenResume, onDownloadResume }: HeroProps) {
           </div>
         </div>
       </div>
-
-      {/* Upload Confirmation Toast */}
-      {uploadToast && (
-        <div className="fixed bottom-6 left-6 z-50 bg-[#0d0f18] border border-purple-500/40 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in duration-300">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <div className="text-xs">
-            <span className="font-semibold block">Photo Loaded Successfully</span>
-            <span className="text-slate-400">Banupriya Mani's exact uploaded photo is active.</span>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
